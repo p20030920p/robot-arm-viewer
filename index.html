@@ -1,0 +1,214 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Robot Arm Viewer · 3D 预览</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: rgba(19, 23, 31, .82);
+    --line: rgba(255, 255, 255, .09);
+    --text: #e6ebf2;
+    --dim: #8b97a8;
+    --accent: #39c5bb;
+    --accent-2: #f5a9c0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font: 13px/1.5 "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #view { display: block; width: 100vw; height: 100vh; outline: none; touch-action: none; }
+  body.dragging { user-select: none; cursor: grabbing; }
+
+  /* ---------- 右侧控制面板 ---------- */
+  #panel {
+    position: fixed; top: 14px; right: 14px; width: 306px; max-height: calc(100vh - 28px);
+    display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    backdrop-filter: blur(14px) saturate(1.2); box-shadow: 0 18px 48px rgba(0,0,0,.45);
+    overflow-y: auto; transition: transform .28s ease, opacity .2s;
+  }
+  #panel.closed { transform: translateX(calc(100% + 20px)); opacity: 0; }
+  #panel header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--line);
+  }
+  #panel h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .02em; flex: 1; }
+  #panel h1 span { color: var(--accent); }
+  .grp { padding: 8px 12px; border-bottom: 1px solid var(--line); }
+  .grp:last-child { border-bottom: 0; }
+  #joints { flex: 0 0 auto; }
+  .lbl { color: var(--dim); font-size: 11px; letter-spacing: .06em; margin-bottom: 8px; text-transform: uppercase; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  button {
+    font: inherit; color: var(--text); cursor: pointer;
+    background: rgba(255,255,255,.055); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; transition: background .15s, border-color .15s, color .15s;
+  }
+  button:hover { background: rgba(255,255,255,.11); }
+  button:active { transform: translateY(1px); }
+
+  .seg { display: flex; gap: 4px; background: rgba(255,255,255,.045); border-radius: 9px; padding: 3px; }
+  .seg button { flex: 1; border: 0; background: transparent; padding: 6px 4px; color: var(--dim); border-radius: 7px; }
+  .seg button.on { background: var(--accent); color: #06231f; font-weight: 600; }
+  #modelSel {
+    width: 100%; font: inherit; color: var(--text);
+    background: rgba(255,255,255,.055); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 9px;
+  }
+
+  /* ---------- 关节滑条 ---------- */
+  .joint { display: grid; grid-template-columns: 30px 1fr 56px; align-items: center; gap: 8px; margin: 4px 0; }
+  .joint .jn { color: var(--dim); font-variant-numeric: tabular-nums; font-size: 12px; }
+  .joint .jn.hot { color: var(--accent); }
+  .joint input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; cursor: ew-resize;
+  }
+  .joint input[type=range]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 3px;
+    background: linear-gradient(90deg, rgba(57,197,187,.55), rgba(245,169,192,.55));
+  }
+  .joint input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5px; border-radius: 50%;
+    background: #fff; border: 2px solid var(--accent); box-shadow: 0 2px 6px rgba(0,0,0,.5);
+  }
+  .joint input[type=number] {
+    width: 100%; font: inherit; font-variant-numeric: tabular-nums; text-align: right;
+    color: var(--text); background: rgba(255,255,255,.05); border: 1px solid var(--line);
+    border-radius: 7px; padding: 3px 6px;
+  }
+  .joint input[type=number]:focus { outline: 1px solid var(--accent); }
+  .joint input[type=number]::-webkit-outer-spin-button,
+  .joint input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  .toggles { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; }
+  .toggles label { display: flex; align-items: center; gap: 7px; cursor: pointer; color: #c4ccd8; }
+  .toggles input { accent-color: var(--accent); width: 14px; height: 14px; }
+
+  /* ---------- 左下角信息 ---------- */
+  #hint {
+    position: fixed; left: 16px; bottom: 14px; color: var(--dim); font-size: 12px;
+    pointer-events: none; text-shadow: 0 1px 4px #000;
+  }
+  #hint b { color: #cdd6e2; font-weight: 600; }
+  #readout {
+    position: fixed; left: 16px; top: 14px; font-variant-numeric: tabular-nums;
+    color: #aeb9c8; font-size: 12px; line-height: 1.7; pointer-events: none;
+    background: rgba(12,15,20,.72); border: 1px solid var(--line); border-radius: 10px;
+    padding: 9px 12px; backdrop-filter: blur(8px);
+  }
+  #readout .k { color: #6f7c8d; }
+  #readout .v { color: var(--accent); }
+
+  #toggle {
+    position: fixed; top: 14px; right: 14px; z-index: 5; width: 38px; height: 38px;
+    display: none; align-items: center; justify-content: center; font-size: 17px;
+    border-radius: 10px; background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  }
+  #toggle.show { display: flex; }
+
+  /* ---------- 载入遮罩 ---------- */
+  #boot {
+    position: fixed; inset: 0; display: grid; place-items: center; gap: 14px;
+    background: #0e1116; z-index: 20; transition: opacity .45s;
+  }
+  #boot.done { opacity: 0; pointer-events: none; }
+  #boot .box { text-align: center; }
+  #boot .ring {
+    width: 42px; height: 42px; margin: 0 auto 16px; border-radius: 50%;
+    border: 3px solid rgba(255,255,255,.12); border-top-color: var(--accent);
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #boot .msg { color: var(--dim); font-size: 13px; }
+  #boot .err { color: #ff8790; max-width: 520px; text-align: left; white-space: pre-wrap; }
+</style>
+<script type="importmap">
+  { "imports": { "three": "./vendor/three.module.js" } }
+</script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="readout">
+    <div><span class="k">末端位置 </span><span class="v" id="eePos">–</span></div>
+    <div><span class="k">姿态模式 </span><span class="v" id="modeTip">关节拖拽</span></div>
+  </div>
+
+  <div id="hint"><b>左键拖</b> 转视角 · <b>滚轮</b> 缩放 · <b>右键拖</b> 平移 · <b>拖机械臂</b> 摆动关节</div>
+
+  <button id="toggle" title="展开面板">☰</button>
+
+  <aside id="panel">
+    <header>
+      <h1>Robot Arm Viewer <span>·</span> 3D 预览</h1>
+      <button id="hide" title="收起面板" style="padding:4px 8px">—</button>
+    </header>
+
+    <section class="grp">
+      <div class="lbl">拖动方式</div>
+      <div class="seg" id="modeSeg">
+        <button data-mode="joint" class="on">关节拖拽</button>
+        <button data-mode="ee">末端拖拽</button>
+      </div>
+    </section>
+
+    <section class="grp">
+      <div class="lbl">模型</div>
+      <select id="modelSel">
+        <option value="assets/urdf/ur5e.urdf">UR5e（官方）</option>
+        <option value="assets/urdf/miku_dummy.urdf">Miku Arm</option>
+      </select>
+    </section>
+
+    <section class="grp" id="joints">
+      <div class="lbl">关节角度 (°)</div>
+    </section>
+
+    <section class="grp">
+      <div class="lbl">姿态</div>
+      <div class="row">
+        <button id="btnZero">全部归零</button>
+        <button id="btnHome">初始姿态</button>
+        <button id="btnRand">随机姿态</button>
+        <button id="btnFit">复位视角</button>
+      </div>
+    </section>
+
+    <section class="grp">
+      <div class="lbl">显示</div>
+      <div class="toggles">
+        <label><input type="checkbox" id="tGrid" checked> 地面网格</label>
+        <label><input type="checkbox" id="tAxes"> 坐标轴</label>
+        <label><input type="checkbox" id="tWire"> 线框</label>
+        <label><input type="checkbox" id="tSpin"> 自动旋转</label>
+        <label><input type="checkbox" id="tShadow" checked> 阴影</label>
+        <label><input type="checkbox" id="tMarker" checked> 末端标记</label>
+      </div>
+    </section>
+
+    <section class="grp">
+      <div class="row">
+        <button id="btnShot">保存截图</button>
+        <button id="btnCopy">复制关节值</button>
+      </div>
+    </section>
+  </aside>
+
+  <div id="boot">
+    <div class="box">
+      <div class="ring"></div>
+      <div class="msg" id="bootMsg">正在载入模型…</div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
+
+
